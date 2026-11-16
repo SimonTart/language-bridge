@@ -1,6 +1,6 @@
 {
   "name": "language-bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Type in your own language; the model reads English, and its English replies are shown translated back.",
   "author": {
     "name": "SimonTart",
@@ -24,24 +24,41 @@
       "description": "Your language as a BCP-47 code (zh-CN, ja, ko, fr, ...). en turns translation off.",
       "default": "zh-CN"
     },
+    "provider": {
+      "type": "string",
+      "title": "Translator",
+      "description": "auto: the API when a key is set, else the fake translator. api: always call the API (also keyless local servers such as Ollama). fake: only tag the text, for testing.",
+      "options": [
+        "auto",
+        "api",
+        "fake"
+      ],
+      "default": "auto"
+    },
     "apiKey": {
       "type": "string",
       "title": "API key",
-      "description": "SiliconFlow (or other OpenAI-compatible) API key. Left empty, SILICONFLOW_API_KEY is read; with neither, a fake translator only tags the text.",
+      "description": "API key for the translation service. Left empty, LANGUAGE_BRIDGE_API_KEY (then SILICONFLOW_API_KEY) is read from the environment.",
       "sensitive": true,
       "default": ""
     },
     "model": {
       "type": "string",
       "title": "Model",
-      "description": "The model to translate with; a fast non-reasoning call is made (enable_thinking: false).",
+      "description": "The model to translate with, as the service names it.",
       "default": "deepseek-ai/DeepSeek-V4.1-Flash"
     },
     "baseUrl": {
       "type": "string",
       "title": "API base URL",
-      "description": "OpenAI-compatible endpoint; /chat/completions is appended.",
+      "description": "OpenAI-compatible API base URL; /chat/completions is appended unless the URL already ends with it.",
       "default": "https://api.siliconflow.cn/v1"
+    },
+    "extraBody": {
+      "type": "string",
+      "title": "Extra request fields",
+      "description": "A JSON object merged into every request body. The default turns off SiliconFlow's thinking; clear it for services that reject unknown fields.",
+      "default": "{\"enable_thinking\": false}"
     }
   }
 }

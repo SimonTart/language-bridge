@@ -32,31 +32,32 @@ claude plugin install language-bridge --marketplace SimonTart/language-bridge
 | Field | What it is | Default |
 |---|---|---|
 | `language` | Your language as a BCP-47 code: `zh-CN`, `zh-TW`, `ja`, `ko`, `fr`, `de`, `es`, … Set `en` to turn translation off. | `zh-CN` |
+| `provider` | `auto`: call the API when a key is set, else use the fake translator. `api`: always call the API (for keyless local servers such as Ollama). `fake`: only tag the text, for testing. | `auto` |
 | `apiKey` | API key for the translation service. Stored in your system's secure storage (the Keychain on macOS), never in a settings file. | empty |
 | `model` | Model name, as the service spells it. | `deepseek-ai/DeepSeek-V4.1-Flash` |
-| `baseUrl` | API base URL. `/chat/completions` is appended to it. | `https://api.siliconflow.cn/v1` |
+| `baseUrl` | API base URL. `/chat/completions` is appended unless the URL already ends with it. | `https://api.siliconflow.cn/v1` |
+| `extraBody` | A JSON object merged into every request body, for a service's own parameters. The default turns off SiliconFlow's thinking; clear it (`{}`) for services that reject unknown fields. | `{"enable_thinking": false}` |
 
 **Where to set them**
 
 - **During install**, the settings screen asks for every field.
-- **Afterwards**, `language`, `model` and `baseUrl` are rows in `/config`. A change there reloads the plugin.
-- **API key from the environment**: if `apiKey` is empty, the plugin reads `SILICONFLOW_API_KEY`:
+- **Afterwards**, every field but `apiKey` is a row in `/config`. A change there reloads the plugin.
+- **API key from the environment**: if `apiKey` is empty, the plugin reads `LANGUAGE_BRIDGE_API_KEY`, then `SILICONFLOW_API_KEY`:
   ```
-  export SILICONFLOW_API_KEY=sk-...   # e.g. in ~/.zshrc
+  export LANGUAGE_BRIDGE_API_KEY=sk-...   # e.g. in ~/.zshrc
   ```
-- With no key at all, a **fake translator** is used: it only tags the text (`【zh-CN】…`), so you can see the pipeline working without spending anything.
+- With `provider` on `auto` and no key at all, a **fake translator** is used: it only tags the text (`【zh-CN】…`), so you can see the pipeline working without spending anything.
 
 **Getting a SiliconFlow key**: sign in at [cloud.siliconflow.cn](https://cloud.siliconflow.cn), open the API keys page in the console and create one.
 
 **Using another service**: point `baseUrl` and `model` at any OpenAI-compatible endpoint, for example:
 
-| Service | `baseUrl` | `model` |
-|---|---|---|
-| SiliconFlow (default) | `https://api.siliconflow.cn/v1` | `deepseek-ai/DeepSeek-V4.1-Flash` |
-| DeepSeek | `https://api.deepseek.com` | a model from its `/models` list |
-| OpenAI | `https://api.openai.com/v1` | e.g. `gpt-4o-mini` |
-
-Each request currently also sends `enable_thinking: false`, which SiliconFlow uses to skip reasoning. Services that reject unknown parameters may refuse it; making this configurable is planned.
+| Service | `provider` | `baseUrl` | `model` | `extraBody` |
+|---|---|---|---|---|
+| SiliconFlow (default) | `auto` | `https://api.siliconflow.cn/v1` | `deepseek-ai/DeepSeek-V4.1-Flash` | `{"enable_thinking": false}` |
+| DeepSeek | `auto` | `https://api.deepseek.com` | a model from its `/models` list | `{}` |
+| OpenAI | `auto` | `https://api.openai.com/v1` | e.g. `gpt-4o-mini` | `{}` |
+| Ollama (local) | `api` | `http://localhost:11434/v1` | e.g. `qwen2.5:7b` | `{}` |
 
 ## Usage
 
@@ -74,13 +75,18 @@ Just type in your language. Commands:
 | Translated | Not translated |
 |---|---|
 | Prompts you type (terminal, remote control, SDK hosts) | Slash commands and skills, task notifications, messages from other agents |
-| The model's reply text, including the text between tool calls | Thinking, tool calls and their output, AskUserQuestion dialogs, plans, todo lists, subagent replies, reply summaries |
+| The model's reply text, including the text between tool calls | Thinking, tool calls and their output, plans, todo lists, subagent replies, reply summaries |
+| Question dialogs (AskUserQuestion): questions, headers, options and their descriptions | Option previews |
+| The wrap-up box: recap, question and reply buttons | The app's own buttons |
+| The session title, set from your first prompt as typed | Files the model writes |
 
-Within translated text, fenced code blocks, inline code, paths, commands and URLs are kept as written. If a translation changes the number of code fences, it is discarded and the original is shown. Prompts longer than 8,000 characters (pasted logs, files) are sent as typed.
+**Code is never sent for translation.** Fenced code blocks are swapped for placeholders before the request and put back byte for byte afterwards; a reply that is only code costs no request. If a placeholder does not come back exactly once, the translation is discarded and the original is shown. Inline code, paths, commands and URLs are kept by the prompt, which also wraps the text in `<source>` tags so text that reads like an instruction is translated, not followed. Prompts longer than 8,000 characters (pasted logs, files) are sent as typed.
+
+Dialogs and the wrap-up box first appear in English and switch in place once translated. Clicking a translated reply button puts the translated text in the prompt, which is translated back to English when you send it.
 
 ## Cost
 
-Each prompt costs one translation request, and each reply text block costs one more. With DeepSeek-V4.1-Flash on SiliconFlow (at the time of writing: ¥2 per million input tokens and ¥8 per million output tokens at peak, half price 02:00–08:00 China time), a typical turn costs well under ¥0.01.
+Each prompt costs one translation request, each reply text block one more, and each question dialog or wrap-up box one more. With DeepSeek-V4.1-Flash on SiliconFlow (at the time of writing: ¥2 per million input tokens and ¥8 per million output tokens at peak, half price 02:00–08:00 China time), a typical turn costs well under ¥0.01.
 
 ## Known limits
 
@@ -131,9 +137,11 @@ Code: `hooks/register.ts` (hooks), `hooks/translate.ts` (API call and prompt), `
 | `baseUrl` | 接口地址，后面会自动拼上 `/chat/completions` | `https://api.siliconflow.cn/v1` |
 
 - **安装时**：设置页会依次让你填写以上字段。
-- **安装后**：`language`、`model`、`baseUrl` 可以在 `/config` 里修改。
-- **用环境变量提供 key**：`apiKey` 为空时会读取 `SILICONFLOW_API_KEY`，比如在 `~/.zshrc` 里加一行 `export SILICONFLOW_API_KEY=sk-...`。
-- **没有 key 时**：使用假翻译，只给文本加个标记（`【zh-CN】…`），方便不花钱先验证流程。
+- **安装后**：除 `apiKey` 外的字段都可以在 `/config` 里修改。
+- **`provider`**：`auto` 表示有 key 就调接口、没有就用假翻译；`api` 表示总是调接口（适合不需要 key 的本地服务，如 Ollama）；`fake` 表示只用假翻译。
+- **`extraBody`**：一段 JSON，会合并进每个请求体，用来传服务商自己的参数。默认值 `{"enable_thinking": false}` 用于关闭硅基流动的思考；换成不认识这个字段的服务时改成 `{}`。
+- **用环境变量提供 key**：`apiKey` 为空时依次读取 `LANGUAGE_BRIDGE_API_KEY`、`SILICONFLOW_API_KEY`，比如在 `~/.zshrc` 里加一行 `export LANGUAGE_BRIDGE_API_KEY=sk-...`。
+- **没有 key 时**：`provider` 为 `auto` 时使用假翻译，只给文本加个标记（`【zh-CN】…`），方便不花钱先验证流程。
 - **获取硅基流动 key**：登录 [cloud.siliconflow.cn](https://cloud.siliconflow.cn)，在控制台的 API 密钥页面新建一个。
 - **换别的服务**：把 `baseUrl` 和 `model` 改成对应服务的值即可，参考上面英文部分的表格。
 
@@ -143,4 +151,8 @@ Code: `hooks/register.ts` (hooks), `hooks/translate.ts` (API call and prompt), `
 
 ### 翻译范围
 
-会翻译你输入的内容和模型的回复文字。思考过程、工具调用及其输出、提问框、计划、待办列表、子代理回复都不翻译。回复里的代码块、行内代码、路径、命令、URL 保持原样。
+会翻译：你输入的内容、模型的回复文字、提问框（问题、标签、选项和选项说明）、工作结束时的小结框（小结、问题、回复按钮），以及会话标题（取你第一句话的原文）。
+
+不翻译：思考过程、工具调用及其输出、计划、待办列表、子代理回复、模型写入的文件。
+
+代码块不会发给翻译服务：发送前替换成占位符，翻译完再原样放回；整段都是代码的回复不发请求。行内代码、路径、命令、URL 由提示词要求保持原样。

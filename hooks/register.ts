@@ -1,21 +1,40 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { hash, isEnglish, isValidLang, mayBeIn, normalize, trKey } from './text'
-import { translate, type TranslatorConfig } from './translate'
+import { translate, translateList, usesApi, type Provider, type TranslatorConfig } from './translate'
 
 const tr = { plugin: 'language-bridge', key: 'tr' } as const
 const orig = { plugin: 'language-bridge', key: 'orig' } as const
 const langRef = { plugin: 'language-bridge', key: 'lang' } as const
+const titled = { plugin: 'language-bridge', key: 'titled' } as const
 
 /** Prompts longer than this (a pasted log, a file) go to the model as typed. */
 const MAX_INPUT_CHARS = 8000
+/** The AskUserQuestion schema caps a header at 12 characters. */
+const MAX_HEADER_CHARS = 12
+const TITLE_CHARS = 50
 
+// Only what a person typed: at the terminal, through remote control, or in
+// an SDK host such as the desktop app or `claude -p`.
 const TYPED_ORIGINS = new Set<string>(['composer', 'bridge', 'sdk'])
 
 type Settings = { config: TranslatorConfig; configured: string }
 
-// Reply blocks being translated now, so a block is sent once. A reload
-// forgets it, at worst translating a block twice.
+type Question = {
+  question: string
+  header: string
+  options: { label: string; description: string; preview?: string }[]
+  multiSelect: boolean
+}
+type NextStep = {
+  recap: string
+  ask?: string
+  blocked: boolean
+  actions: ({ label: string } | { action: string })[]
+}
+
+// Texts being translated now, so each is sent once. A reload forgets it, at
+// worst translating a text twice.
 const inFlight = new Set<string>()
 // One error toast per kind of failure, not one per block.
 let lastError = ''
@@ -32,7 +51,8 @@ function report($: EngineInterface, err: unknown) {
   $.ui.toast(`language-bridge: ${msg}`)
 }
 
-async function translateReply($: EngineInterface, s: Settings, lang: string, text: string) {
+/** Translates one reply block (markdown) and stores it. */
+async function translateBlock($: EngineInterface, s: Settings, lang: string, text: string) {
   if (!normalize(text)) return
   const id = trKey(lang, text)
   if (inFlight.has(id)) return
@@ -42,9 +62,7 @@ async function translateReply($: EngineInterface, s: Settings, lang: string, tex
   try {
     const out = await translate($, s.config, text, lang)
     // Unchanged: the reply was already in the person's language.
-    if (normalize(out) !== normalize(text)) {
-      await $.state.set({ ...tr, id }, out)
-    }
+    if (normalize(out) !== normalize(text)) await $.state.set({ ...tr, id }, out)
     lastError = ''
   } catch (err) {
     report($, err)
@@ -53,26 +71,100 @@ async function translateReply($: EngineInterface, s: Settings, lang: string, tex
   }
 }
 
-async function translateReplies($: EngineInterface, s: Settings, texts: string[]) {
+async function translateBlocks($: EngineInterface, s: Settings, texts: string[]) {
   const lang = await currentLang($, s)
   if (isEnglish(lang)) return
-  await Promise.all(texts.map(text => translateReply($, s, lang, text)))
+  await Promise.all(texts.map(text => translateBlock($, s, lang, text)))
+}
+
+/** Translates short strings in one request, each stored under its own key. */
+async function translateStrings($: EngineInterface, s: Settings, texts: string[]) {
+  const lang = await currentLang($, s)
+  if (isEnglish(lang)) return
+  const todo: string[] = []
+  for (const text of new Set(texts)) {
+    const id = trKey(lang, text)
+    if (!normalize(text) || inFlight.has(id)) continue
+    const { value } = await $.state.get({ ...tr, id })
+    if (value === undefined) todo.push(text)
+  }
+  if (todo.length === 0) return
+  const ids = todo.map(text => trKey(lang, text))
+  ids.forEach(id => inFlight.add(id))
+  try {
+    const out = await translateList($, s.config, todo, lang)
+    for (let i = 0; i < todo.length; i++) {
+      if (normalize(out[i]!) !== normalize(todo[i]!)) await $.state.set({ ...tr, id: ids[i]! }, out[i]!)
+    }
+    lastError = ''
+  } catch (err) {
+    report($, err)
+  } finally {
+    ids.forEach(id => inFlight.delete(id))
+  }
+}
+
+/** The stored translation of each text that has one. Subscribes the drawing. */
+async function lookup($: EngineInterface, s: Settings, texts: string[]): Promise<Map<string, string>> {
+  const lang = await currentLang($, s)
+  const found = new Map<string, string>()
+  if (isEnglish(lang)) return found
+  for (const text of texts) {
+    if (!text || found.has(text)) continue
+    const { value } = await $.state.get({ ...tr, id: trKey(lang, text) })
+    if (value) found.set(text, value)
+  }
+  return found
+}
+
+function questionStrings(questions: Question[]): string[] {
+  return questions.flatMap(q => [q.question, q.header, ...q.options.flatMap(o => [o.label, o.description])])
+}
+
+function nextStepStrings(step: NextStep | undefined): string[] {
+  if (!step) return []
+  const labels = step.actions.flatMap(a => ('label' in a ? [a.label] : []))
+  return [step.recap, ...(step.ask ? [step.ask] : []), ...labels]
+}
+
+/** Parses the extraBody option; `error` set when it is not a JSON object. */
+function parseExtraBody(raw: string): { value: Record<string, unknown>; error?: string } {
+  if (!raw.trim()) return { value: {} }
+  try {
+    const value: unknown = JSON.parse(raw)
+    if (value && typeof value === 'object' && !Array.isArray(value)) return { value: value as Record<string, unknown> }
+  } catch {
+    // falls through to the error
+  }
+  return { value: {}, error: 'extraBody is not a JSON object; ignored' }
+}
+
+function readProvider(raw: unknown): Provider {
+  return raw === 'api' || raw === 'fake' ? raw : 'auto'
 }
 
 export const register: Register = (on, options) => {
   const s: Settings = {
     config: {
+      provider: readProvider(options.provider),
       apiKey: String(options.apiKey ?? '').trim(),
       model: String(options.model ?? 'deepseek-ai/DeepSeek-V4.1-Flash').trim(),
       baseUrl: String(options.baseUrl ?? 'https://api.siliconflow.cn/v1').trim(),
+      extraBody: {},
     },
     configured: String(options.language ?? 'zh-CN').trim() || 'en',
   }
+  const extraBody = parseExtraBody(String(options.extraBody ?? '{"enable_thinking": false}'))
+  s.config.extraBody = extraBody.value
 
   on('session.start', async ($, e, next) => {
+    if (extraBody.error) $.ui.toast(`language-bridge: ${extraBody.error}`)
     // A secret userConfig field has no row in /config; the environment is the
     // other way to give the key, and the field wins when both are set.
-    if (!s.config.apiKey) s.config.apiKey = ((await $.env.get('SILICONFLOW_API_KEY')) ?? '').trim()
+    if (!s.config.apiKey) {
+      const fromEnv = (await $.env.get('LANGUAGE_BRIDGE_API_KEY')) ?? (await $.env.get('SILICONFLOW_API_KEY'))
+      s.config.apiKey = (fromEnv ?? '').trim()
+    }
     await $.command.register({
       name: 'lang',
       description: 'Show or switch the language replies are translated into (this session)',
@@ -85,9 +177,11 @@ export const register: Register = (on, options) => {
     const arg = e.args.trim()
     if (!arg) {
       const lang = await currentLang($, s)
-      const provider = s.config.apiKey ? `${s.config.model} via ${s.config.baseUrl}` : 'fake (no API key set)'
+      const translator = usesApi(s.config)
+        ? `${s.config.model} via ${s.config.baseUrl}`
+        : 'fake (no API key set)'
       return {
-        text: `Language: ${lang}${isEnglish(lang) ? ' (translation off)' : ''}\nTranslator: ${provider}`,
+        text: `Language: ${lang}${isEnglish(lang) ? ' (translation off)' : ''}\nTranslator: ${translator}`,
       }
     }
     if (arg === 'reset') {
@@ -110,8 +204,6 @@ export const register: Register = (on, options) => {
   // Input: the person's language → English, before the model reads it.
   on('prompt.submit', async ($, e, next) => {
     if (e.command || e.isMeta) return next(e)
-    // Only what a person typed: at the terminal, through remote control, or
-    // in an SDK host such as the desktop app or `claude -p`.
     if (!TYPED_ORIGINS.has(e.origin.kind)) return next(e)
     const lang = await currentLang($, s)
     if (isEnglish(lang) || !mayBeIn(lang, e.text)) return next(e)
@@ -130,6 +222,23 @@ export const register: Register = (on, options) => {
     await $.state.set({ ...orig, id: hash(normalize(english)) }, e.text)
     return next({ ...e, text: english })
   }).catch(($, e, next) => next(e)) // a failed hook sends the prompt as typed
+
+  // Name the session after the first prompt as typed, not its English: the
+  // engine would title it from what the model reads.
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    const result = await next(e)
+    const { value: done } = await $.state.get(titled)
+    if (done) return result
+    const lang = await currentLang($, s)
+    if (isEnglish(lang)) return result
+    const { value: typed } = await $.state.get({ ...orig, id: hash(normalize(e.prompt)) })
+    const text = typed ?? (mayBeIn(lang, e.prompt) ? e.prompt : undefined)
+    if (!text || text.trimStart().startsWith('/')) return result
+    await $.state.set(titled, true)
+    const line = text.replace(/\s+/g, ' ').trim()
+    const title = line.length > TITLE_CHARS ? `${line.slice(0, TITLE_CHARS - 1)}…` : line
+    return { ...result, sessionTitle: title }
+  }).catch(($, e, next) => next(e))
 
   // Show the prompt as typed, though the transcript stores its English.
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
@@ -150,7 +259,7 @@ export const register: Register = (on, options) => {
     if (e.agentId || blocks.size === 0) return
     const texts = [...blocks.values()]
     $.clock.after(1, () => {
-      void translateReplies($, s, texts)
+      void translateBlocks($, s, texts)
     })
   })
 
@@ -162,5 +271,80 @@ export const register: Register = (on, options) => {
     if (isEnglish(lang)) return next(e)
     const { value } = await $.state.get({ ...tr, id: trKey(lang, e.props.text) })
     return value ? next({ ...e, props: { ...e.props, text: value } }) : next(e)
+  })
+
+  // The question dialog: start translating as it opens; it redraws when done.
+  on('tool.call', { tool: 'AskUserQuestion' }, ($, e, next) => {
+    const questions = (e as unknown as { questions?: Question[] }).questions
+    if (Array.isArray(questions)) {
+      const texts = questionStrings(questions)
+      $.clock.after(1, () => {
+        void translateStrings($, s, texts)
+      })
+    }
+    return next(e)
+  }).catch(($, e, next) => next(e)) // a failure here never blocks the dialog
+
+  on('ui.render', { component: 'AskUserQuestion' }, async ($, e, next) => {
+    const questions = e.props.questions as Question[]
+    if (!Array.isArray(questions)) return next(e)
+    const t = await lookup($, s, questionStrings(questions))
+    if (t.size === 0) return next(e)
+    const translated = questions.map(q => {
+      const header = t.get(q.header) ?? q.header
+      return {
+        ...q,
+        question: t.get(q.question) ?? q.question,
+        header: header.length <= MAX_HEADER_CHARS ? header : q.header,
+        options: q.options.map(o => ({
+          ...o,
+          label: t.get(o.label) ?? o.label,
+          description: t.get(o.description) ?? o.description,
+        })),
+      }
+    })
+    return next({ ...e, props: { ...e.props, questions: translated } })
+  })
+
+  // The wrap-up box (recap, question, reply buttons): translate once it ran.
+  on('tool.call', { tool: 'WrapUp' }, async ($, e, next) => {
+    const ran = await next(e)
+    const input = e as unknown as { recap?: string; ask?: string }
+    const step = (ran.result as { nextStep?: NextStep } | undefined)?.nextStep
+    const texts = [...nextStepStrings(step), input.recap ?? '', input.ask ?? ''].filter(Boolean)
+    if (texts.length > 0) {
+      $.clock.after(1, () => {
+        void translateStrings($, s, texts)
+      })
+    }
+    return ran
+  }).catch(($, e, next) => next(e)) // replays the call's own result
+
+  on('ui.render', { component: 'ToolResult', props: { tool: 'WrapUp' } }, async ($, e, next) => {
+    const output = e.props.output as { nextStep?: NextStep } | undefined
+    const step = output?.nextStep
+    if (!step) return next(e)
+    const t = await lookup($, s, nextStepStrings(step))
+    if (t.size === 0) return next(e)
+    const nextStep: NextStep = {
+      ...step,
+      recap: t.get(step.recap) ?? step.recap,
+      ...(step.ask ? { ask: t.get(step.ask) ?? step.ask } : {}),
+      actions: step.actions.map(a => ('label' in a ? { ...a, label: t.get(a.label) ?? a.label } : a)),
+    }
+    return next({ ...e, props: { ...e.props, output: { ...output, nextStep } } })
+  })
+
+  on('ui.render', { component: 'ToolUse', props: { tool: 'WrapUp' } }, async ($, e, next) => {
+    const input = e.props.input as { recap?: string; ask?: string } | undefined
+    if (!input || typeof input.recap !== 'string') return next(e)
+    const t = await lookup($, s, [input.recap, input.ask ?? ''])
+    if (t.size === 0) return next(e)
+    const rewritten = {
+      ...input,
+      recap: t.get(input.recap) ?? input.recap,
+      ...(input.ask ? { ask: t.get(input.ask) ?? input.ask } : {}),
+    }
+    return next({ ...e, props: { ...e.props, input: rewritten } })
   })
 }

@@ -7,6 +7,8 @@ declare module 'claude-code' {
       orig: StateFamily<string>
       /** Language chosen with /lang this session; unset falls back to userConfig. */
       lang: string
+      /** Whether this session has been given a title from its first prompt. */
+      titled: boolean
     }
   }
 }
