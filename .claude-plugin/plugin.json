@@ -1,0 +1,47 @@
+{
+  "name": "language-bridge",
+  "version": "0.1.0",
+  "description": "Type in your own language; the model reads English, and its English replies are shown translated back.",
+  "author": {
+    "name": "SimonTart",
+    "url": "https://github.com/SimonTart"
+  },
+  "homepage": "https://github.com/SimonTart/language-bridge",
+  "repository": "https://github.com/SimonTart/language-bridge",
+  "license": "MIT",
+  "keywords": [
+    "translation",
+    "i18n",
+    "language",
+    "chinese",
+    "japanese"
+  ],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "Your language as a BCP-47 code (zh-CN, ja, ko, fr, ...). en turns translation off.",
+      "default": "zh-CN"
+    },
+    "apiKey": {
+      "type": "string",
+      "title": "API key",
+      "description": "SiliconFlow (or other OpenAI-compatible) API key. Left empty, SILICONFLOW_API_KEY is read; with neither, a fake translator only tags the text.",
+      "sensitive": true,
+      "default": ""
+    },
+    "model": {
+      "type": "string",
+      "title": "Model",
+      "description": "The model to translate with; a fast non-reasoning call is made (enable_thinking: false).",
+      "default": "deepseek-ai/DeepSeek-V4.1-Flash"
+    },
+    "baseUrl": {
+      "type": "string",
+      "title": "API base URL",
+      "description": "OpenAI-compatible endpoint; /chat/completions is appended.",
+      "default": "https://api.siliconflow.cn/v1"
+    }
+  }
+}

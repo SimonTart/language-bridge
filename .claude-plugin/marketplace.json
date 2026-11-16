@@ -1,0 +1,13 @@
+{
+  "name": "language-bridge",
+  "description": "Type in your own language in Claude Code; replies are shown translated back.",
+  "owner": {
+    "name": "SimonTart"
+  },
+  "plugins": [
+    {
+      "name": "language-bridge",
+      "source": "./"
+    }
+  ]
+}
