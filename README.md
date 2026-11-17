@@ -84,6 +84,8 @@ Just type in your language. Commands:
 
 **Code is never sent for translation.** Fenced code blocks are swapped for placeholders before the request and put back byte for byte afterwards; a reply that is only code costs no request. If a placeholder does not come back exactly once, the translation is discarded and the original is shown. Inline code, paths, commands and URLs are kept by the prompt, which also wraps the text in `<source>` tags so text that reads like an instruction is translated, not followed. Prompts longer than 8,000 characters (pasted logs, files) are sent as typed.
 
+**If translating a prompt fails** (network error, bad key, a service error), nothing is sent: the reason is shown and your text is put back in the prompt box, so you can retry or edit it.
+
 Dialogs and the wrap-up box first appear in English and switch in place once translated. Clicking a translated reply button puts the translated text in the prompt, which is translated back to English when you send it.
 
 ## Files the model writes
@@ -181,3 +183,5 @@ Code: `hooks/register.ts` (hooks), `hooks/translate.ts` (API call and prompt), `
 模型写入的文件不翻译，但新建的文档会直接用你的语言写，见上文“模型写的文件”。
 
 代码块不会发给翻译服务：发送前替换成占位符，翻译完再原样放回；整段都是代码的回复不发请求。行内代码、路径、命令、URL 由提示词要求保持原样。
+
+**输入翻译失败时**（网络错误、key 不对、服务报错）不会发送：会显示原因，并把你的原文放回输入框，方便重试或修改。

@@ -1,6 +1,6 @@
 {
   "name": "language-bridge",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Type in your own language; the model reads English, and its English replies are shown translated back.",
   "author": {
     "name": "SimonTart",

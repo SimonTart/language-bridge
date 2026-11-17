@@ -55,6 +55,21 @@ function report($: EngineInterface, err: unknown) {
   $.ui.toast(`language-bridge: ${msg}`)
 }
 
+/**
+ * A prompt whose translation failed: send nothing, say why, and put the text
+ * back in the prompt box to retry or edit (unless the person typed a new draft).
+ */
+async function refuse($: EngineInterface, text: string, err: unknown) {
+  const msg = err instanceof Error ? err.message : String(err)
+  try {
+    const box = await $.prompt.read()
+    if (!box.text) await $.prompt.fill({ text })
+  } catch {
+    // no box to fill (a -p run, an SDK host): the reason still shows
+  }
+  return { drop: `language-bridge: translation failed, prompt not sent (${msg})` }
+}
+
 /** Translates one reply block (markdown) and stores it. */
 async function translateBlock($: EngineInterface, s: Settings, lang: string, text: string) {
   if (!normalize(text)) return
@@ -236,13 +251,15 @@ export const register: Register = (on, options) => {
     try {
       english = await translate($, s.config, e.text, 'en')
     } catch (err) {
-      report($, err)
-      return next(e)
+      return refuse($, e.text, err)
     }
     if (normalize(english) === normalize(e.text)) return next(e)
     await $.state.set({ ...orig, id: hash(normalize(english)) }, e.text)
     return next({ ...e, text: english })
-  }).catch(($, e, next) => next(e)) // a failed hook sends the prompt as typed
+    // A failed hook sends nothing either; once the prompt went down, it stands.
+  }).catch(($, e, next) =>
+    next.called ? next(e) : refuse($, e.text, next.error.message ?? `translation ${next.error.kind}`),
+  )
 
   // Name the session after the first prompt as typed, not its English: the
   // engine would title it from what the model reads.

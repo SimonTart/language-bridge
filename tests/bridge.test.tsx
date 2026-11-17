@@ -94,17 +94,25 @@ test(
   },
 )
 
-test('a failed request sends the prompt as typed', { options: { apiKey: 'sk-test' } }, async ($, on) => {
+test('a failed request sends nothing and puts the prompt back in the box', { options: { apiKey: 'sk-test' } }, async ($, on) => {
   on('http.fetch', () => ({ value: { status: 500, ok: false, headers: {}, text: 'boom' } }))
   on('ui.toast', () => ({ value: undefined }))
-  let reached = ''
+  on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
+  let filled = ''
+  on('prompt.fill', (_, e) => {
+    filled = e.text
+    return { isFilled: true }
+  })
+  let reached: string | undefined
   on('prompt.submit', (_, e) => {
     reached = e.text
     return { text: e.text }
   })
 
-  await $.prompt.submit({ text: '修复 bug', origin: { kind: 'composer' }, wait: false })
-  expect(reached).toBe('修复 bug')
+  const result = await $.prompt.submit({ text: '修复 bug', origin: { kind: 'composer' }, wait: false })
+  expect(reached).toBeUndefined()
+  expect(result.drop).toContain('translation failed')
+  expect(filled).toBe('修复 bug')
 })
 
 test('a reply is drawn in translation once its step ends', async ($, on) => {
