@@ -1,7 +1,7 @@
 import type { CommandRunInput, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { fenceCount, mayBeIn, normalize, trKey } from '../hooks/text'
+import { fenceCount, mayBeIn, normalize, preview, trKey } from '../hooks/text'
 
 // The engine's own drawing of a row: its text, so a test can read it back.
 function drawText(on: On) {
@@ -42,8 +42,43 @@ test('a Chinese prompt reaches the model in English and is drawn as typed', asyn
     component: 'UserMessage',
     props: { text: reached, origin: { kind: 'composer' }, isExpanded: false },
   })
-  expect((await ui.find({ type: 'Text' }))?.text).toBe('修复登录页的 bug')
+  const texts = await ui.findAll({ type: 'Text' })
+  expect(texts[0]?.text).toBe('修复登录页的 bug')
+  // The English the model read, dim beneath it.
+  expect(texts[1]?.text).toBe('→ [en] 修复登录页的 bug')
+  expect(texts[1]?.props.dimColor).toBe(true)
   await ui.unmount()
+})
+
+test('a long prompt shows a preview of its English; the expanded view shows it whole', async ($, on) => {
+  let reached = ''
+  on('prompt.submit', (_, e) => {
+    reached = e.text
+    return { text: e.text }
+  })
+  drawText(on)
+
+  await $.prompt.submit({ text: '第一行\n第二行\n第三行', origin: { kind: 'composer' }, wait: false })
+  expect(reached).toBe('[en] 第一行\n第二行\n第三行')
+
+  for (const isExpanded of [false, true]) {
+    const ui = await $.ui.mount({
+      plugin: 'language-bridge',
+      surface: 'terminal',
+      component: 'UserMessage',
+      props: { text: reached, origin: { kind: 'composer' }, isExpanded },
+    })
+    const texts = await ui.findAll({ type: 'Text' })
+    expect(texts[0]?.text).toBe('第一行\n第二行\n第三行')
+    expect(texts[1]?.text).toBe(isExpanded ? '→ [en] 第一行\n第二行\n第三行' : '→ [en] 第一行\n第二行…')
+    await ui.unmount()
+  }
+})
+
+test('preview: lines and characters', async () => {
+  expect(preview('one')).toBe('one')
+  expect(preview('one\n\ntwo\nthree')).toBe('one\ntwo…')
+  expect(preview('x'.repeat(200))).toBe(`${'x'.repeat(159)}…`)
 })
 
 test('an English prompt passes untouched, with no request', async ($, on) => {

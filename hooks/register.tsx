@@ -1,7 +1,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { FILES_SECTION_ID, filesSection } from './files'
-import { hash, isEnglish, isValidLang, mayBeIn, normalize, trKey } from './text'
+import { hash, isEnglish, isValidLang, mayBeIn, normalize, preview, trKey } from './text'
 import { translate, translateList, usesApi, type Provider, type TranslatorConfig } from './translate'
 
 const tr = { plugin: 'language-bridge', key: 'tr' } as const
@@ -278,10 +278,23 @@ export const register: Register = (on, options) => {
     return { ...result, sessionTitle: title }
   }).catch(($, e, next) => next(e))
 
-  // Show the prompt as typed, though the transcript stores its English.
+  // Show the prompt as typed, though the transcript stores its English, with
+  // the English the model read dim beneath it: a mistranslated prompt turns
+  // into wrong edits, so the person gets to see it. The row shows a preview;
+  // the expanded view (ctrl+o) shows it whole.
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
     const { value } = await $.state.get({ ...orig, id: hash(normalize(e.props.text)) })
-    return value ? next({ ...e, props: { ...e.props, text: value } }) : next(e)
+    if (!value) return next(e)
+    const english = normalize(e.props.text)
+    const typed = await next({ ...e, props: { ...e.props, text: value } })
+    const { Box, Text } = $.ui.resolve(e)
+    const shown = e.props.isExpanded ? english : preview(english)
+    return (
+      <Box flexDirection="column">
+        {typed}
+        <Text dimColor>→ {shown}</Text>
+      </Box>
+    )
   })
 
   // Output: collect each text block of a main-loop response as it streams by,

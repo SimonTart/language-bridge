@@ -86,3 +86,18 @@ export function languageName(lang: string): string {
   }
   return `the language with BCP-47 code "${lang}"`
 }
+
+/**
+ * A short look at a long text: its first `maxLines` non-blank lines, cut at
+ * `maxChars` in all, with `…` when anything was left out.
+ */
+export function preview(text: string, maxLines = 2, maxChars = 160): string {
+  const lines = text.split('\n').map(l => l.trimEnd()).filter(l => l.trim())
+  let out = lines.slice(0, maxLines).join('\n')
+  let cut = lines.length > maxLines
+  if (out.length > maxChars) {
+    out = out.slice(0, maxChars - 1).trimEnd()
+    cut = true
+  }
+  return cut ? `${out}…` : out
+}
