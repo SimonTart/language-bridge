@@ -1,5 +1,6 @@
 import type { EngineInterface, Register } from 'claude-code'
 
+import { FILES_SECTION_ID, filesSection } from './files'
 import { hash, isEnglish, isValidLang, mayBeIn, normalize, trKey } from './text'
 import { translate, translateList, usesApi, type Provider, type TranslatorConfig } from './translate'
 
@@ -18,7 +19,10 @@ const TITLE_CHARS = 50
 // an SDK host such as the desktop app or `claude -p`.
 const TYPED_ORIGINS = new Set<string>(['composer', 'bridge', 'sdk'])
 
-type Settings = { config: TranslatorConfig; configured: string }
+type Settings = { config: TranslatorConfig; configured: string; files: FileLanguage }
+
+/** auto: tell the model which language to write files in. en: say nothing; files stay English. */
+type FileLanguage = 'auto' | 'en'
 
 type Question = {
   question: string
@@ -143,6 +147,10 @@ function readProvider(raw: unknown): Provider {
   return raw === 'api' || raw === 'fake' ? raw : 'auto'
 }
 
+function readFileLanguage(raw: unknown): FileLanguage {
+  return raw === 'en' ? 'en' : 'auto'
+}
+
 export const register: Register = (on, options) => {
   const s: Settings = {
     config: {
@@ -153,6 +161,7 @@ export const register: Register = (on, options) => {
       extraBody: {},
     },
     configured: String(options.language ?? 'zh-CN').trim() || 'en',
+    files: readFileLanguage(options.fileLanguage),
   }
   const extraBody = parseExtraBody(String(options.extraBody ?? '{"enable_thinking": false}'))
   s.config.extraBody = extraBody.value
@@ -200,6 +209,18 @@ export const register: Register = (on, options) => {
         : `Replies from now on are shown in ${arg}; earlier ones stay as they were.`,
     }
   })
+
+  // Files: the engine composes the system prompt for every request, so a /lang
+  // switch reaches the next one. The section sits after the cache boundary
+  // (session scope) and is replaced, never repeated.
+  on('prompt.compose', async ($, e, next) => {
+    const composed = await next(e)
+    if (s.files === 'en') return composed
+    const lang = await currentLang($, s)
+    if (isEnglish(lang)) return composed
+    const sections = composed.sections.filter(sec => sec.id !== FILES_SECTION_ID)
+    return { sections: [...sections, { id: FILES_SECTION_ID, text: filesSection(lang), scope: 'session' as const }] }
+  }).catch(($, e, next) => next(e)) // a failure leaves the prompt as the engine made it
 
   // Input: the person's language → English, before the model reads it.
   on('prompt.submit', async ($, e, next) => {

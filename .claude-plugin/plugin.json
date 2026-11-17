@@ -1,6 +1,6 @@
 {
   "name": "language-bridge",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Type in your own language; the model reads English, and its English replies are shown translated back.",
   "author": {
     "name": "SimonTart",
@@ -32,6 +32,16 @@
         "auto",
         "api",
         "fake"
+      ],
+      "default": "auto"
+    },
+    "fileLanguage": {
+      "type": "string",
+      "title": "File language",
+      "description": "auto: ask the model to write new documents (plans, notes, reports) in your language; project files follow the language the project already uses, and existing files keep theirs. en: say nothing; files are written in English.",
+      "options": [
+        "auto",
+        "en"
       ],
       "default": "auto"
     },
