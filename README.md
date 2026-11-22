@@ -5,7 +5,7 @@ Use Claude Code in your own language. A Claude Code plugin (mod) that translates
 [中文说明](#中文说明)
 
 - **You type** in Chinese, Japanese, French, … → the model receives English.
-- **The model replies** in English → the reply first appears in English, then turns into your language in place, about a second later.
+- **The model replies** in English → the reply first appears in English, then turns into your language in place, about a second later, with the start of the English dim beneath it (the first two lines; ctrl+o shows the reply in English whole).
 - **Only the display changes.** The stored conversation, the model's context and the ctrl+o transcript stay in English. Your own prompt is still shown the way you typed it, with the English the model received dim beneath it (the first two lines; ctrl+o shows it whole), so a mistranslation is caught before it turns into wrong edits.
 - Translation goes through any **OpenAI-compatible chat completions API**. The default is [SiliconFlow](https://cloud.siliconflow.cn) with `deepseek-ai/DeepSeek-V4.1-Flash`, with thinking turned off, so a translation usually comes back in about a second.
 
@@ -134,7 +134,7 @@ Code: `hooks/register.tsx` (hooks), `hooks/translate.ts` (API call and prompt), 
 
 在 Claude Code 里用自己的语言交流。你打的话会先翻译成英文再交给模型；模型的英文回复会原地显示成你的语言。
 
-- **只改显示**：保存的对话、模型的上下文、ctrl+o 里看到的记录都还是英文。你自己的输入仍按原样显示，下面用淡色附上模型实际收到的英文（只显示前两行，ctrl+o 里显示全文），译错了能及时发现。
+- **只改显示**：保存的对话、模型的上下文、ctrl+o 里看到的记录都还是英文。你自己的输入仍按原样显示，下面用淡色附上模型实际收到的英文（只显示前两行，ctrl+o 里显示全文），译错了能及时发现。模型的回复翻译后，下面同样用淡色附上英文原文的前两行，ctrl+o 里可以看到完整的英文回复。
 - **翻译服务**：任何 OpenAI 兼容的 chat completions 接口都可以。默认是硅基流动的 `deepseek-ai/DeepSeek-V4.1-Flash`，关闭了思考，一般一秒左右返回。
 
 ### 安装

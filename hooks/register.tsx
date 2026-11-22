@@ -328,14 +328,27 @@ export const register: Register = (on, options) => {
     })
   })
 
-  // Draw a reply block in translation once one is stored. Reading the state
-  // subscribes this row, so the write above redraws it in place.
+  // Draw a reply block in translation once one is stored, with the start of
+  // the English it came from dim beneath it, as a prompt's row does: a
+  // mistranslation is caught at a glance, and ctrl+o shows the English whole.
+  // Reading the state subscribes this row, so the write above redraws it in place.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     if (e.props.isSummary) return next(e)
     const lang = await currentLang($, s)
     if (isEnglish(lang)) return next(e)
     const { value } = await $.state.get({ ...tr, id: trKey(lang, e.props.text) })
-    return value ? next({ ...e, props: { ...e.props, text: value } }) : next(e)
+    if (!value) return next(e)
+    const translated = await next({ ...e, props: { ...e.props, text: value } })
+    if (value.trim() === e.props.text.trim()) return translated
+    const { Box, Text } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column">
+        {translated}
+        <Box paddingLeft={2}>
+          <Text dimColor>→ {preview(e.props.text)}</Text>
+        </Box>
+      </Box>
+    )
   })
 
   // The question dialog: start translating as it opens; it redraws when done.

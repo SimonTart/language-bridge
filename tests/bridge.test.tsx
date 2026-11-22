@@ -168,8 +168,45 @@ test('a reply is drawn in translation once its step ends', async ($, on) => {
   }
   await clock.advance(10)
 
-  expect((await ui.find({ type: 'Text' }))?.text).toBe('【zh-CN】Fixed the bug.')
+  const texts = await ui.findAll({ type: 'Text' })
+  expect(texts[0]?.text).toBe('【zh-CN】Fixed the bug.')
+  // The English it came from, dim beneath it.
+  expect(texts[1]?.text).toBe('→ Fixed the bug.')
+  expect(texts[1]?.props.dimColor).toBe(true)
   await ui.unmount()
+})
+
+test('a long reply shows a preview of its English; an untranslated one shows nothing extra', async ($, on) => {
+  const clock = mock.clock(on)
+  drawText(on)
+  const long = 'First line.\nSecond line.\nThird line.'
+  on('turn.step', async function* (_, e) {
+    yield { kind: 'text', index: 0, text: long } as any
+    return { turnId: e.turnId, index: e.index, answer: long, toolUses: [], stopReason: 'end_turn' } as any
+  })
+  for await (const _ of $.turn.step({ turnId: 't2', index: 0, model: 'm', messageCount: 1 })) {
+    // drain
+  }
+  await clock.advance(10)
+
+  const ui = await $.ui.mount({
+    plugin: 'language-bridge',
+    surface: 'terminal',
+    component: 'AssistantMessage',
+    props: { text: long, isFirstOfReply: true },
+  })
+  const texts = await ui.findAll({ type: 'Text' })
+  expect(texts[1]?.text).toBe('→ First line.\nSecond line.…')
+  await ui.unmount()
+
+  const plain = await $.ui.mount({
+    plugin: 'language-bridge',
+    surface: 'terminal',
+    component: 'AssistantMessage',
+    props: { text: 'Not seen by the translator.', isFirstOfReply: true },
+  })
+  expect((await plain.findAll({ type: 'Text' })).length).toBe(1)
+  await plain.unmount()
 })
 
 test('/lang switches the language and en turns translation off', async ($, on) => {
