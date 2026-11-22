@@ -238,7 +238,15 @@ test('the model never sees the code, and a code-only reply costs no request', { 
 
 test(
   'provider api calls a keyless server, with extraBody as given',
-  { options: { provider: 'api', baseUrl: 'http://localhost:11434/v1', model: 'qwen2.5:7b', extraBody: '{"top_p": 0.5}' } },
+  {
+    options: {
+      provider: 'api',
+      baseUrl: 'http://localhost:11434/v1',
+      model: 'qwen2.5:7b',
+      thinkingFormat: 'none',
+      extraBody: '{"top_p": 0.5}',
+    },
+  },
   async ($, on) => {
     let headers: Record<string, string> = {}
     let body: any
@@ -260,6 +268,104 @@ test(
     expect(body.enable_thinking).toBeUndefined()
   },
 )
+
+// --- 0.6.0: thinking formats -------------------------------------------------
+
+import { THINKING_FORMATS, stripThinking, thinkingOff } from '../hooks/translate'
+
+// Captures the body of each request the translator sends, answering `content`.
+function captureBodies(on: any, content: string): any[] {
+  const bodies: any[] = []
+  on('http.fetch', (_: unknown, e: any) => {
+    bodies.push(JSON.parse(e.init!.body as string))
+    return reply(content)
+  })
+  return bodies
+}
+
+test('each thinking format sends its own off field', async () => {
+  expect(thinkingOff('qwen')).toEqual({ enable_thinking: false })
+  expect(thinkingOff('deepseek')).toEqual({ thinking: { type: 'disabled' } })
+  expect(thinkingOff('zai')).toEqual({ thinking: { type: 'disabled' } })
+  expect(thinkingOff('openrouter')).toEqual({ reasoning: { effort: 'none' } })
+  expect(thinkingOff('together')).toEqual({ reasoning: { enabled: false } })
+  expect(thinkingOff('chat-template')).toEqual({ chat_template_kwargs: { enable_thinking: false } })
+  expect(thinkingOff('none')).toEqual({})
+  expect(THINKING_FORMATS.length).toBe(7)
+})
+
+test('a leading thinking block is dropped; one inside the text stays', async () => {
+  expect(stripThinking('<think>\nhmm\n</think>\n\n修好了')).toBe('\n\n修好了')
+  expect(stripThinking('  <think></think>修好了')).toBe('修好了')
+  expect(stripThinking('用 <think> 标签')).toBe('用 <think> 标签')
+  expect(stripThinking('修好了')).toBe('修好了')
+})
+
+test(
+  'thinkingFormat deepseek sends thinking.type, and only that',
+  { options: { apiKey: 'sk-test', thinkingFormat: 'deepseek' } },
+  async ($, on) => {
+    const bodies = captureBodies(on, 'fix the bug')
+    on('prompt.submit', (_, e) => ({ text: e.text }))
+    await $.prompt.submit({ text: '修 bug', origin: { kind: 'composer' }, wait: false })
+    expect(bodies[0].thinking).toEqual({ type: 'disabled' })
+    expect(bodies[0].enable_thinking).toBeUndefined()
+  },
+)
+
+test('an unknown thinkingFormat falls back to qwen', { options: { apiKey: 'sk-test', thinkingFormat: 'nope' } }, async ($, on) => {
+  const bodies = captureBodies(on, 'fix the bug')
+  on('prompt.submit', (_, e) => ({ text: e.text }))
+  await $.prompt.submit({ text: '修 bug', origin: { kind: 'composer' }, wait: false })
+  expect(bodies[0].enable_thinking).toBe(false)
+})
+
+test(
+  'extraBody may change the thinking field and temperature, never model, stream or messages',
+  {
+    options: {
+      apiKey: 'sk-test',
+      extraBody: '{"enable_thinking": true, "temperature": 0.3, "model": "x", "stream": true, "messages": []}',
+    },
+  },
+  async ($, on) => {
+    const bodies = captureBodies(on, 'fix the bug')
+    on('prompt.submit', (_, e) => ({ text: e.text }))
+    await $.prompt.submit({ text: '修 bug', origin: { kind: 'composer' }, wait: false })
+    const body = bodies[0]
+    expect(body.enable_thinking).toBe(true)
+    expect(body.temperature).toBe(0.3)
+    expect(body.model).toBe('deepseek-ai/DeepSeek-V4.1-Flash')
+    expect(body.stream).toBe(false)
+    expect(body.messages.length).toBe(2)
+  },
+)
+
+test('a thinking block in the answer never reaches the model', { options: { apiKey: 'sk-test' } }, async ($, on) => {
+  captureBodies(on, '<think>The user wants a bug fixed.</think>\nFix the bug')
+  let reached = ''
+  on('prompt.submit', (_, e) => {
+    reached = e.text
+    return { text: e.text }
+  })
+  await $.prompt.submit({ text: '修 bug', origin: { kind: 'composer' }, wait: false })
+  expect(reached).toBe('Fix the bug')
+})
+
+test('an answer that is only a thinking block counts as a failed translation', { options: { apiKey: 'sk-test' } }, async ($, on) => {
+  captureBodies(on, '<think>Hmm.</think>')
+  on('ui.toast', () => ({ value: undefined }))
+  on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
+  on('prompt.fill', () => ({ isFilled: true }))
+  let reached: string | undefined
+  on('prompt.submit', (_, e) => {
+    reached = e.text
+    return { text: e.text }
+  })
+  const result = await $.prompt.submit({ text: '修 bug', origin: { kind: 'composer' }, wait: false })
+  expect(reached).toBeUndefined()
+  expect(result.drop).toContain('translation failed')
+})
 
 const QUESTIONS = [
   {

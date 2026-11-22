@@ -37,7 +37,8 @@ claude plugin install language-bridge --marketplace SimonTart/language-bridge
 | `apiKey` | API key for the translation service. Stored in your system's secure storage (the Keychain on macOS), never in a settings file. | empty |
 | `model` | Model name, as the service spells it. | `deepseek-ai/DeepSeek-V4.1-Flash` |
 | `baseUrl` | API base URL. `/chat/completions` is appended unless the URL already ends with it. | `https://api.siliconflow.cn/v1` |
-| `extraBody` | A JSON object merged into every request body, for a service's own parameters. The default turns off SiliconFlow's thinking; clear it (`{}`) for services that reject unknown fields. | `{"enable_thinking": false}` |
+| `thinkingFormat` | How the service is told to skip thinking, so a translation comes back fast. Pick the one your service takes (see the table below); `none` sends nothing. | `qwen` |
+| `extraBody` | A JSON object merged into every request body, for anything else a service needs. It may override the thinking field and `temperature`, never `model`, `stream` or `messages`. | `{}` |
 
 **Where to set them**
 
@@ -51,14 +52,19 @@ claude plugin install language-bridge --marketplace SimonTart/language-bridge
 
 **Getting a SiliconFlow key**: sign in at [cloud.siliconflow.cn](https://cloud.siliconflow.cn), open the API keys page in the console and create one.
 
-**Using another service**: point `baseUrl` and `model` at any OpenAI-compatible endpoint, for example:
+**Using another service**: every service here speaks OpenAI chat completions; they differ only in how thinking is turned off. Point `baseUrl` and `model` at the service and pick its `thinkingFormat`:
 
-| Service | `provider` | `baseUrl` | `model` | `extraBody` |
+| Service | `provider` | `baseUrl` | `model` | `thinkingFormat` |
 |---|---|---|---|---|
-| SiliconFlow (default) | `auto` | `https://api.siliconflow.cn/v1` | `deepseek-ai/DeepSeek-V4.1-Flash` | `{"enable_thinking": false}` |
-| DeepSeek | `auto` | `https://api.deepseek.com` | a model from its `/models` list | `{}` |
-| OpenAI | `auto` | `https://api.openai.com/v1` | e.g. `gpt-4o-mini` | `{}` |
-| Ollama (local) | `api` | `http://localhost:11434/v1` | e.g. `qwen2.5:7b` | `{}` |
+| SiliconFlow (default) | `auto` | `https://api.siliconflow.cn/v1` | `deepseek-ai/DeepSeek-V4.1-Flash` | `qwen` |
+| DeepSeek | `auto` | `https://api.deepseek.com` | a model from its `/models` list | `deepseek` |
+| Zhipu | `auto` | its OpenAI-compatible URL | its model name | `zai` |
+| OpenRouter | `auto` | `https://openrouter.ai/api/v1` | a model ID from openrouter.ai/models | `openrouter` |
+| OpenAI | `auto` | `https://api.openai.com/v1` | e.g. `gpt-4o-mini` | `none` |
+| vLLM, SGLang (local) | `api` | e.g. `http://localhost:8000/v1` | the served model | `chat-template` |
+| Ollama (local) | `api` | `http://localhost:11434/v1` | e.g. `qwen2.5:7b` | `none` |
+
+What each value sends: `qwen` → `enable_thinking: false`; `deepseek`, `zai` → `thinking: {"type": "disabled"}`; `openrouter` → `reasoning: {"effort": "none"}`; `together` → `reasoning: {"enabled": false}`; `chat-template` → `chat_template_kwargs: {"enable_thinking": false}`; `none` → nothing. The names and fields follow [pi-ai](https://github.com/earendil-works/pi)'s `compat.thinkingFormat`. Should a model still put a `<think>…</think>` block at the start of its answer, the block is dropped.
 
 ## Usage
 
@@ -150,15 +156,17 @@ Code: `hooks/register.tsx` (hooks), `hooks/translate.ts` (API call and prompt), 
 | `apiKey` | 翻译服务的 API key，存进系统安全存储（macOS 是钥匙串），不写进配置文件 | 空 |
 | `model` | 模型名 | `deepseek-ai/DeepSeek-V4.1-Flash` |
 | `baseUrl` | 接口地址，后面会自动拼上 `/chat/completions` | `https://api.siliconflow.cn/v1` |
+| `thinkingFormat` | 用哪种方式让服务关闭思考，翻译才快。按服务选择，见下文 | `qwen` |
 
 - **安装时**：设置页会依次让你填写以上字段。
 - **安装后**：除 `apiKey` 外的字段都可以在 `/config` 里修改。
 - **`provider`**：`auto` 表示有 key 就调接口、没有就用假翻译；`api` 表示总是调接口（适合不需要 key 的本地服务，如 Ollama）；`fake` 表示只用假翻译。
-- **`extraBody`**：一段 JSON，会合并进每个请求体，用来传服务商自己的参数。默认值 `{"enable_thinking": false}` 用于关闭硅基流动的思考；换成不认识这个字段的服务时改成 `{}`。
+- **`thinkingFormat`**：各家服务都是 OpenAI 兼容接口，区别只在怎么关思考。`qwen`（硅基流动、通义千问）发 `enable_thinking: false`；`deepseek`、`zai`（DeepSeek、智谱）发 `thinking: {"type": "disabled"}`；`openrouter` 发 `reasoning: {"effort": "none"}`；`together` 发 `reasoning: {"enabled": false}`；`chat-template`（vLLM、SGLang）发 `chat_template_kwargs: {"enable_thinking": false}`；`none`（OpenAI、Ollama）什么都不发。模型若仍在回答开头带 `<think>…</think>`，会被去掉。
+- **`extraBody`**：一段 JSON，会合并进每个请求体，用来传服务商的其他参数，默认 `{}`。它可以覆盖关思考的字段和 `temperature`，但不能覆盖 `model`、`stream`、`messages`。
 - **用环境变量提供 key**：`apiKey` 为空时依次读取 `LANGUAGE_BRIDGE_API_KEY`、`SILICONFLOW_API_KEY`，比如在 `~/.zshrc` 里加一行 `export LANGUAGE_BRIDGE_API_KEY=sk-...`。
 - **没有 key 时**：`provider` 为 `auto` 时使用假翻译，只给文本加个标记（`【zh-CN】…`），方便不花钱先验证流程。
 - **获取硅基流动 key**：登录 [cloud.siliconflow.cn](https://cloud.siliconflow.cn)，在控制台的 API 密钥页面新建一个。
-- **换别的服务**：把 `baseUrl` 和 `model` 改成对应服务的值即可，参考上面英文部分的表格。
+- **换别的服务**：把 `baseUrl`、`model` 改成对应服务的值，再选好 `thinkingFormat`，参考上面英文部分的表格。
 
 ### 用法
 

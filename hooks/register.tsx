@@ -2,7 +2,15 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { FILES_SECTION_ID, filesSection } from './files'
 import { hash, isEnglish, isValidLang, mayBeIn, normalize, preview, trKey } from './text'
-import { translate, translateList, usesApi, type Provider, type TranslatorConfig } from './translate'
+import {
+  THINKING_FORMATS,
+  translate,
+  translateList,
+  usesApi,
+  type Provider,
+  type ThinkingFormat,
+  type TranslatorConfig,
+} from './translate'
 
 const tr = { plugin: 'language-bridge', key: 'tr' } as const
 const orig = { plugin: 'language-bridge', key: 'orig' } as const
@@ -162,6 +170,11 @@ function readProvider(raw: unknown): Provider {
   return raw === 'api' || raw === 'fake' ? raw : 'auto'
 }
 
+/** An unknown value falls back to qwen, what the default service (SiliconFlow) takes. */
+function readThinkingFormat(raw: unknown): ThinkingFormat {
+  return THINKING_FORMATS.find(f => f === raw) ?? 'qwen'
+}
+
 function readFileLanguage(raw: unknown): FileLanguage {
   return raw === 'en' ? 'en' : 'auto'
 }
@@ -173,12 +186,13 @@ export const register: Register = (on, options) => {
       apiKey: String(options.apiKey ?? '').trim(),
       model: String(options.model ?? 'deepseek-ai/DeepSeek-V4.1-Flash').trim(),
       baseUrl: String(options.baseUrl ?? 'https://api.siliconflow.cn/v1').trim(),
+      thinkingFormat: readThinkingFormat(options.thinkingFormat),
       extraBody: {},
     },
     configured: String(options.language ?? 'zh-CN').trim() || 'en',
     files: readFileLanguage(options.fileLanguage),
   }
-  const extraBody = parseExtraBody(String(options.extraBody ?? '{"enable_thinking": false}'))
+  const extraBody = parseExtraBody(String(options.extraBody ?? '{}'))
   s.config.extraBody = extraBody.value
 
   on('session.start', async ($, e, next) => {
@@ -202,7 +216,7 @@ export const register: Register = (on, options) => {
     if (!arg) {
       const lang = await currentLang($, s)
       const translator = usesApi(s.config)
-        ? `${s.config.model} via ${s.config.baseUrl}`
+        ? `${s.config.model} via ${s.config.baseUrl} (thinking off: ${s.config.thinkingFormat})`
         : 'fake (no API key set)'
       return {
         text: `Language: ${lang}${isEnglish(lang) ? ' (translation off)' : ''}\nTranslator: ${translator}`,

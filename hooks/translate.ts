@@ -4,18 +4,51 @@ import { fenceCount, isEnglish, languageName } from './text'
 
 export type Provider = 'auto' | 'api' | 'fake'
 
+/**
+ * How a service is told to skip thinking. All of them speak OpenAI chat
+ * completions; they differ only in this field. The names are pi-ai's
+ * `compat.thinkingFormat`, and so are the fields each one sends.
+ */
+export const THINKING_FORMATS = ['qwen', 'deepseek', 'zai', 'openrouter', 'together', 'chat-template', 'none'] as const
+export type ThinkingFormat = (typeof THINKING_FORMATS)[number]
+
 export type TranslatorConfig = {
   /** auto: the API when a key is set, else fake. api: always the API (keyless local servers). */
   provider: Provider
   apiKey: string
   model: string
   baseUrl: string
-  /** Merged into every request body, e.g. `{ "enable_thinking": false }`. */
+  thinkingFormat: ThinkingFormat
+  /** Merged into every request body after the thinking field, for anything else a service needs. */
   extraBody: Record<string, unknown>
 }
 
 export function usesApi(config: TranslatorConfig): boolean {
   return config.provider === 'api' || (config.provider === 'auto' && config.apiKey !== '')
+}
+
+/** The request fields that turn thinking off in the given format. */
+export function thinkingOff(format: ThinkingFormat): Record<string, unknown> {
+  switch (format) {
+    case 'qwen':
+      return { enable_thinking: false }
+    case 'deepseek':
+    case 'zai':
+      return { thinking: { type: 'disabled' } }
+    case 'openrouter':
+      return { reasoning: { effort: 'none' } }
+    case 'together':
+      return { reasoning: { enabled: false } }
+    case 'chat-template':
+      return { chat_template_kwargs: { enable_thinking: false } }
+    case 'none':
+      return {}
+  }
+}
+
+/** Drops a thinking block some models put at the start of the answer itself. */
+export function stripThinking(text: string): string {
+  return text.replace(/^\s*<think>[\s\S]*?<\/think>/, '')
 }
 
 /** `baseUrl` may be the API root or already the full chat completions URL. */
@@ -151,11 +184,14 @@ async function complete(
   const res = await $.http.fetch(endpoint(config.baseUrl), {
     method: 'POST',
     headers,
+    // Later fields win: extraBody may change the thinking field or the
+    // temperature, never the model, the streaming mode or the messages.
     body: JSON.stringify({
-      model: config.model,
       temperature: 0,
-      stream: false,
+      ...thinkingOff(config.thinkingFormat),
       ...config.extraBody,
+      model: config.model,
+      stream: false,
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },
@@ -171,9 +207,8 @@ async function complete(
   } catch {
     throw new Error('the translator answered something other than JSON')
   }
-  const content = data.choices?.[0]?.message?.content
-  if (typeof content !== 'string' || content.trim() === '') {
-    throw new Error('the translator returned no text')
-  }
-  return content.trim()
+  const raw = data.choices?.[0]?.message?.content
+  const content = typeof raw === 'string' ? stripThinking(raw).trim() : ''
+  if (content === '') throw new Error('the translator returned no text')
+  return content
 }

@@ -1,6 +1,6 @@
 {
   "name": "language-bridge",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Type in your own language; the model reads English, and its English replies are shown translated back.",
   "author": {
     "name": "SimonTart",
@@ -64,11 +64,26 @@
       "description": "OpenAI-compatible API base URL; /chat/completions is appended unless the URL already ends with it.",
       "default": "https://api.siliconflow.cn/v1"
     },
+    "thinkingFormat": {
+      "type": "string",
+      "title": "Thinking off",
+      "description": "How the service is told to skip thinking, so a translation comes back fast. qwen: enable_thinking (SiliconFlow, Qwen). deepseek, zai: thinking.type (DeepSeek, Zhipu). openrouter: reasoning.effort. together: reasoning.enabled. chat-template: chat_template_kwargs (vLLM, SGLang). none: send nothing (OpenAI, Ollama).",
+      "options": [
+        "qwen",
+        "deepseek",
+        "zai",
+        "openrouter",
+        "together",
+        "chat-template",
+        "none"
+      ],
+      "default": "qwen"
+    },
     "extraBody": {
       "type": "string",
       "title": "Extra request fields",
-      "description": "A JSON object merged into every request body. The default turns off SiliconFlow's thinking; clear it for services that reject unknown fields.",
-      "default": "{\"enable_thinking\": false}"
+      "description": "A JSON object merged into every request body, for anything else a service needs. It may override the thinking field and temperature, never the model, stream or messages.",
+      "default": "{}"
     }
   }
 }
