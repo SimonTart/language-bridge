@@ -479,48 +479,11 @@ test('the session is titled once, from the first prompt as typed', async ($, on)
   expect((second as any).sessionTitle).toBeUndefined()
 })
 
-// --- 0.3.0: language of new files --------------------------------------------
+// --- 0.8.0: the system prompt is the engine's --------------------------------
 
-import { FILES_SECTION_ID, filesSection } from '../hooks/files'
-
-// A test passes the whole input; the engine's own composition stands in as one section.
-const composeInput = { model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] }
-const engineSection = (on: any) => on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'core', scope: 'shared' }] }))
-const compose = async ($: any) => (await $.prompt.compose(composeInput)).sections as { id: string; text: string; scope: string }[]
-const filesText = async ($: any) =>
-  (await compose($)).find(sec => sec.id === FILES_SECTION_ID)
-
-test('the files section names the language by its code, leaves replies alone and never mentions translation', async () => {
-  const text = filesSection('ja')
-  expect(text).toContain('in ja unless')
-  expect(text).not.toContain('Japanese')
-  expect(text).not.toContain('read by')
-  expect(text).toContain('only to files you create')
-  expect(text).toContain('does not change the language you reply in')
-  expect(text).not.toContain('translat')
-  expect(text).toContain('bilingual')
-})
-
-test('the system prompt carries the files section once, after the cache boundary', async ($, on) => {
-  engineSection(on)
-  const first = await filesText($)
-  expect(first?.scope).toBe('session')
-  expect(first?.text).toContain('in zh-CN unless')
-  const sections = await compose($)
-  expect(sections[0]?.id).toBe('intro')
-  expect(sections.filter(sec => sec.id === FILES_SECTION_ID).length).toBe(1)
-})
-
-test('/lang switches the files section; en drops it', async ($, on) => {
-  engineSection(on)
-  on('command.register', () => ({ value: { command: 'lang' } }))
-  await $.command.run(lang('ko'))
-  expect((await filesText($))?.text).toContain('in ko unless')
-  await $.command.run(lang('en'))
-  expect(await filesText($)).toBeUndefined()
-})
-
-test('fileLanguage en leaves the system prompt alone', { options: { fileLanguage: 'en' } }, async ($, on) => {
-  engineSection(on)
-  expect(await filesText($)).toBeUndefined()
+test('the system prompt is left as the engine composed it', async ($, on) => {
+  const composeInput = { model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] }
+  on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'core', scope: 'shared' }] }))
+  const { sections } = await $.prompt.compose(composeInput as any)
+  expect(sections.map((sec: { id: string }) => sec.id)).toEqual(['intro'])
 })

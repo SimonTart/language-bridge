@@ -33,7 +33,6 @@ claude plugin install language-bridge --marketplace SimonTart/language-bridge
 |---|---|---|
 | `language` | Your language as a BCP-47 code: `zh-CN`, `zh-TW`, `ja`, `ko`, `fr`, `de`, `es`, … Set `en` to turn translation off. | `zh-CN` |
 | `provider` | `auto`: call the API when a key is set, else use the fake translator. `api`: always call the API (for keyless local servers such as Ollama). `fake`: only tag the text, for testing. | `auto` |
-| `fileLanguage` | `auto`: ask the model to write new documents in your language (see [Files the model writes](#files-the-model-writes)). `en`: say nothing; files are written in English. | `auto` |
 | `apiKey` | API key for the translation service. Stored in your system's secure storage (the Keychain on macOS), never in a settings file. | empty |
 | `model` | Model name, as the service spells it. | `deepseek-ai/DeepSeek-V4.1-Flash` |
 | `baseUrl` | API base URL. `/chat/completions` is appended unless the URL already ends with it. | `https://api.siliconflow.cn/v1` |
@@ -82,27 +81,16 @@ Just type in your language. Commands:
 | Translated | Not translated |
 |---|---|
 | Prompts you type (terminal, remote control, SDK hosts) | Slash commands and skills, task notifications, messages from other agents |
-| The model's reply text, including the text between tool calls | Thinking, tool calls and their output, plans, todo lists, subagent replies, reply summaries |
+| The model's reply text, including the text between tool calls | Thinking, tool calls and their output, plans, todo lists, subagent replies, reply summaries, files the model writes |
 | Question dialogs (AskUserQuestion): questions, headers, options and their descriptions | Option previews |
 | The wrap-up box: recap, question and reply buttons | The app's own buttons |
 | The session title, set from your first prompt as typed | |
-| Files the model writes: not translated, but written in the right language (below) | |
 
 **Code is never sent for translation.** Fenced code blocks are swapped for placeholders before the request and put back byte for byte afterwards; a reply that is only code costs no request. If a placeholder does not come back exactly once, the translation is discarded and the original is shown. Inline code, paths, commands and URLs are kept by the prompt, which also wraps the text in `<source>` tags so text that reads like an instruction is translated, not followed. Prompts longer than 8,000 characters (pasted logs, files) are sent as typed.
 
 **If translating a prompt fails** (network error, bad key, a service error), nothing is sent: the reason is shown and your text is put back in the prompt box, so you can retry or edit it.
 
 Dialogs and the wrap-up box first appear in English and switch in place once translated. Clicking a translated reply button puts the translated text in the prompt, which is translated back to English when you send it.
-
-## Files the model writes
-
-A file is real output: the model reads it back and edits it, so translating it after the write would leave the disk out of step with what the model remembers. Instead the plugin adds one short section to the system prompt telling the model which language to write **new** files in; files that already exist keep their language. For a new file it picks the first rule that applies:
-
-1. You asked for a language, an English version or a bilingual document: it does that.
-2. A project file (README, docs, changelog, code comments): it follows the language the project's existing files use, English when there are none.
-3. Otherwise a document (a plan, report, notes, summary, any other Markdown file) is in your language.
-
-Replies stay in English and are translated as before. The section is part of the system prompt, not added to each message: one copy, after the prompt cache boundary, replaced when `/lang` switches language. Set `fileLanguage` to `en` to turn it off.
 
 ## Cost
 
@@ -122,7 +110,7 @@ claude plugin validate .                       # check the manifest and hooks mo
 claude plugin test .                           # run tests/*.test.tsx
 ```
 
-Code: `hooks/register.tsx` (hooks), `hooks/translate.ts` (API call and prompt), `hooks/files.ts` (the files section of the system prompt), `hooks/text.ts` (hashing, language checks), `types/index.d.ts` (state contract).
+Code: `hooks/register.tsx` (hooks), `hooks/translate.ts` (API call and prompt), `hooks/text.ts` (hashing, language checks), `types/index.d.ts` (state contract).
 
 ## License
 
@@ -152,7 +140,6 @@ Code: `hooks/register.tsx` (hooks), `hooks/translate.ts` (API call and prompt), 
 | 字段 | 说明 | 默认值 |
 |---|---|---|
 | `language` | 你的语言，BCP-47 代码，如 `zh-CN`、`ja`、`ko`、`fr`。填 `en` 表示关闭翻译 | `zh-CN` |
-| `fileLanguage` | `auto`：让模型用你的语言写新建的文档；`en`：不干预，文件用英文写 | `auto` |
 | `apiKey` | 翻译服务的 API key，存进系统安全存储（macOS 是钥匙串），不写进配置文件 | 空 |
 | `model` | 模型名 | `deepseek-ai/DeepSeek-V4.1-Flash` |
 | `baseUrl` | 接口地址，后面会自动拼上 `/chat/completions` | `https://api.siliconflow.cn/v1` |
@@ -172,23 +159,11 @@ Code: `hooks/register.tsx` (hooks), `hooks/translate.ts` (API call and prompt), 
 
 直接用你的语言输入。命令：`/lang` 查看当前设置；`/lang ja` 本会话切换到日语；`/lang en` 关闭翻译；`/lang reset` 恢复配置里的语言。
 
-### 模型写的文件
-
-文件是真实产物，模型之后还会读、会改，所以不在写完后翻译，而是在系统提示里加一小段规则，让模型写**新文件**时就用对语言；已有文件保持原来的语言。新文件按顺序取第一条适用的：
-
-1. 你明确要求了某种语言、英文版或中英双语：照做。
-2. 项目文件（README、文档、changelog、代码注释）：跟随项目里同类文件的语言，没有可参照的就用英文。
-3. 其余文档（方案、报告、笔记、总结等 Markdown 文件）：用你的语言。
-
-回复仍是英文、照常翻译。这段规则在系统提示里只有一份，不会每条消息追加；`/lang` 换语言时直接替换。`fileLanguage` 设为 `en` 可关闭。
-
 ### 翻译范围
 
 会翻译：你输入的内容、模型的回复文字、提问框（问题、标签、选项和选项说明）、工作结束时的小结框（小结、问题、回复按钮），以及会话标题（取你第一句话的原文）。
 
-不翻译：思考过程、工具调用及其输出、计划、待办列表、子代理回复。
-
-模型写入的文件不翻译，但新建的文档会直接用你的语言写，见上文“模型写的文件”。
+不翻译：思考过程、工具调用及其输出、计划、待办列表、子代理回复，以及模型写入的文件（插件不干预文件内容和语言）。
 
 代码块不会发给翻译服务：发送前替换成占位符，翻译完再原样放回；整段都是代码的回复不发请求。行内代码、路径、命令、URL 由提示词要求保持原样。
 
