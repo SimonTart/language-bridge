@@ -1,6 +1,6 @@
 import type { EngineInterface, Register } from 'claude-code'
 
-import { hash, isEnglish, isValidLang, mayBeIn, normalize, preview, trKey } from './text'
+import { hash, isEnglish, isValidLang, mayBeIn, normalize, pieces, preview, trKey } from './text'
 import {
   THINKING_FORMATS,
   translate,
@@ -138,6 +138,26 @@ async function lookup($: EngineInterface, s: Settings, texts: string[]): Promise
     if (value) found.set(text, value)
   }
   return found
+}
+
+/**
+ * A reply block's translation, put together from its pieces; untranslated
+ * pieces stay in English. Undefined when no piece is translated yet. A block
+ * stored whole (before pieces, 0.8.0 and earlier) is found under its own key.
+ */
+async function lookupReply($: EngineInterface, lang: string, text: string): Promise<string | undefined> {
+  const { value: whole } = await $.state.get({ ...tr, id: trKey(lang, text) })
+  if (whole) return whole
+  const parts = pieces(text)
+  if (parts.length < 2) return undefined
+  let any = false
+  const shown: string[] = []
+  for (const part of parts) {
+    const { value } = await $.state.get({ ...tr, id: trKey(lang, part) })
+    if (value) any = true
+    shown.push(value ?? part)
+  }
+  return any ? shown.join('\n\n') : undefined
 }
 
 function questionStrings(questions: Question[]): string[] {
@@ -290,32 +310,44 @@ export const register: Register = (on, options) => {
     )
   })
 
-  // Output: collect each text block of a main-loop response as it streams by,
-  // then translate after the step, off the turn's path.
+  // Output: collect each text block of a main-loop response as it streams by.
+  // A long block is translated in pieces: each is sent as soon as it closes,
+  // off the turn's path, and the rest once the step ends.
   on('turn.step', async function* ($, e, next) {
     const blocks = new Map<number, string>()
+    const sent = new Set<string>()
+    const send = (texts: string[]) => {
+      const todo = texts.filter(t => !sent.has(t))
+      if (todo.length === 0) return
+      todo.forEach(t => sent.add(t))
+      $.clock.after(1, () => {
+        void translateBlocks($, s, todo)
+      })
+    }
     for await (const chunk of next(e)) {
       if (chunk.kind === 'text') {
-        blocks.set(chunk.index, (blocks.get(chunk.index) ?? '') + chunk.text)
+        const text = (blocks.get(chunk.index) ?? '') + chunk.text
+        blocks.set(chunk.index, text)
+        // A piece can only close on a new line.
+        if (!e.agentId && chunk.text.includes('\n')) send(pieces(text, false))
       }
       yield chunk
     }
     if (e.agentId || blocks.size === 0) return
-    const texts = [...blocks.values()]
-    $.clock.after(1, () => {
-      void translateBlocks($, s, texts)
-    })
+    send([...blocks.values()].flatMap(text => pieces(text)))
   })
 
   // Draw a reply block in translation once one is stored, with the start of
   // the English it came from dim beneath it, as a prompt's row does: a
   // mistranslation is caught at a glance, and ctrl+o shows the English whole.
-  // Reading the state subscribes this row, so the write above redraws it in place.
+  // A block translated in pieces shows each piece translated as it lands, the
+  // rest in English until then. Reading the state subscribes this row, so
+  // each write above redraws it in place.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     if (e.props.isSummary) return next(e)
     const lang = await currentLang($, s)
     if (isEnglish(lang)) return next(e)
-    const { value } = await $.state.get({ ...tr, id: trKey(lang, e.props.text) })
+    const value = await lookupReply($, lang, e.props.text)
     if (!value) return next(e)
     const translated = await next({ ...e, props: { ...e.props, text: value } })
     if (value.trim() === e.props.text.trim()) return translated

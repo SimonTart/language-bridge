@@ -487,3 +487,74 @@ test('the system prompt is left as the engine composed it', async ($, on) => {
   const { sections } = await $.prompt.compose(composeInput as any)
   expect(sections.map((sec: { id: string }) => sec.id)).toEqual(['intro'])
 })
+
+// --- 0.9.0 -----------------------------------------------------------------
+
+import { pieces } from '../hooks/text'
+
+const para = (n: number) => `Paragraph ${n}. ${'word '.repeat(40).trim()}`
+
+test('pieces: cut at blank lines once big enough, the same while streaming and whole', async () => {
+  expect(pieces('Short reply.')).toEqual(['Short reply.'])
+  const text = [1, 2, 3, 4, 5, 6, 7, 8].map(para).join('\n\n')
+  const whole = pieces(text, true, 400)
+  expect(whole.length).toBeGreaterThan(1)
+  expect(whole.join('\n\n')).toBe(text)
+  // Every prefix closes only pieces the whole text also has, in order.
+  for (let end = 1; end <= text.length; end += 7) {
+    const closed = pieces(text.slice(0, end), false, 400)
+    expect(closed).toEqual(whole.slice(0, closed.length))
+    expect(closed.length).toBeLessThan(whole.length)
+  }
+})
+
+test('pieces: never inside a code fence or before an indented line', async () => {
+  const code = '```\n' + 'line\n\n'.repeat(200) + '```'
+  expect(pieces(`${para(1)}\n\n${code}\n\nAfter.`, true, 100)).toEqual([para(1), code, 'After.'])
+  const list = `1. ${para(1)}\n\n   ${para(2)}\n\n2. ${para(3)}`
+  expect(pieces(list, true, 100)).toEqual([`1. ${para(1)}\n\n   ${para(2)}`, `2. ${para(3)}`])
+})
+
+test('pieces: whole paragraphs, closed past 500 characters', async () => {
+  const text = [1, 2, 3, 4, 5, 6, 7, 8].map(para).join('\n\n')
+  const out = pieces(text)
+  expect(out[0]).toBe([1, 2, 3].map(para).join('\n\n')) // 216 characters each
+  expect(out.length).toBe(3)
+})
+
+test('a long reply is translated piece by piece while it streams', async ($, on) => {
+  const clock = mock.clock(on)
+  drawText(on)
+  const parts = [1, 2, 3, 4, 5, 6].map(para)
+  const text = parts.join('\n\n')
+  const expected = pieces(text)
+  expect(expected.length).toBeGreaterThan(1)
+
+  on('turn.step', async function* (_, e) {
+    for (const p of parts) yield { kind: 'text', index: 0, text: `${p}\n\n` } as any
+    return { turnId: e.turnId, index: e.index, answer: text, toolUses: [], stopReason: 'end_turn' } as any
+  })
+  const ui = await $.ui.mount({
+    plugin: 'language-bridge',
+    surface: 'terminal',
+    component: 'AssistantMessage',
+    props: { text, isFirstOfReply: true },
+  })
+
+  let midStream = ''
+  let seen = 0
+  for await (const _ of $.turn.step({ turnId: 't9', index: 0, model: 'm', messageCount: 1 })) {
+    if (++seen === parts.length - 1) {
+      await clock.advance(10)
+      midStream = (await ui.findAll({ type: 'Text' }))[0]?.text ?? ''
+    }
+  }
+  // Before the step ended, the first piece was shown translated, the rest in English.
+  expect(midStream.startsWith(`【zh-CN】${expected[0]}`)).toBe(true)
+  expect(midStream.endsWith(expected[expected.length - 1]!)).toBe(true)
+
+  await clock.advance(10)
+  const done = (await ui.findAll({ type: 'Text' }))[0]?.text
+  expect(done).toBe(expected.map(p => `【zh-CN】${p}`).join('\n\n'))
+  await ui.unmount()
+})

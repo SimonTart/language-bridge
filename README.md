@@ -5,7 +5,7 @@ Use Claude Code in your own language. A Claude Code plugin (mod) that translates
 [中文说明](#中文说明)
 
 - **You type** in Chinese, Japanese, French, … → the model receives English.
-- **The model replies** in English → the reply first appears in English, then turns into your language in place, about a second later, with the start of the English dim beneath it (the first two lines; ctrl+o shows the reply in English whole).
+- **The model replies** in English → the reply first appears in English, then turns into your language in place, about a second later, with the start of the English dim beneath it (the first two lines; ctrl+o shows the reply in English whole). A long reply is translated in pieces of whole paragraphs, each closed once it passes about 500 characters: each piece is sent as soon as the model has written it, so the start of the reply turns into your language while the rest is still being written, instead of the whole reply waiting for one long translation.
 - **Only the display changes.** The stored conversation, the model's context and the ctrl+o transcript stay in English. Your own prompt is still shown the way you typed it, with the English the model received dim beneath it (the first two lines; ctrl+o shows it whole), so a mistranslation is caught before it turns into wrong edits.
 - Translation goes through any **OpenAI-compatible chat completions API**. The default is [SiliconFlow](https://cloud.siliconflow.cn) with `deepseek-ai/DeepSeek-V4.1-Flash`, with thinking turned off, so a translation usually comes back in about a second.
 
@@ -94,12 +94,13 @@ Dialogs and the wrap-up box first appear in English and switch in place once tra
 
 ## Cost
 
-Each prompt costs one translation request, each reply text block one more, and each question dialog or wrap-up box one more. With DeepSeek-V4.1-Flash on SiliconFlow (at the time of writing: ¥2 per million input tokens and ¥8 per million output tokens at peak, half price 02:00–08:00 China time), a typical turn costs well under ¥0.01.
+Each prompt costs one translation request, each reply text block one more (a long one, one per piece of about 500 characters), and each question dialog or wrap-up box one more. With DeepSeek-V4.1-Flash on SiliconFlow (at the time of writing: ¥2 per million input tokens and ¥8 per million output tokens at peak, half price 02:00–08:00 China time), a typical turn costs well under ¥0.01.
 
 ## Known limits
 
 - Right-to-left languages (Arabic, Hebrew) may not display correctly in a terminal.
 - Each prompt waits for one translation (about a second) before it reaches the model.
+- A long reply is translated piece by piece, each without seeing the others, so a term may now and then be worded differently from one piece to the next.
 - `/lang` lasts for the session only; set `language` in `/config` to change the default.
 
 ## Development
@@ -123,6 +124,7 @@ Code: `hooks/register.tsx` (hooks), `hooks/translate.ts` (API call and prompt), 
 在 Claude Code 里用自己的语言交流。你打的话会先翻译成英文再交给模型；模型的英文回复会原地显示成你的语言。
 
 - **只改显示**：保存的对话、模型的上下文、ctrl+o 里看到的记录都还是英文。你自己的输入仍按原样显示，下面用淡色附上模型实际收到的英文（只显示前两行，ctrl+o 里显示全文），译错了能及时发现。模型的回复翻译后，下面同样用淡色附上英文原文的前两行，ctrl+o 里可以看到完整的英文回复。
+- **长回复分段翻译**：长回复按整段切分，每段满约 500 字符就在下一个段落间隔处切开，模型每写完一段就立刻送去翻译，前面的内容先变成你的语言，不用等整段回复写完再一次性翻译。各段分别翻译，个别术语在不同段里的译法偶尔会不一致。
 - **翻译服务**：任何 OpenAI 兼容的 chat completions 接口都可以。默认是硅基流动的 `deepseek-ai/DeepSeek-V4.1-Flash`，关闭了思考，一般一秒左右返回。
 
 ### 安装

@@ -72,6 +72,58 @@ export function mayBeIn(lang: string, text: string): boolean {
   return script ? script.test(text) : true
 }
 
+/** A reply longer than this is translated in pieces of about this size. */
+export const PIECE_CHARS = 500
+
+const FENCE = /^[ \t]*(`{3,}|~{3,})/
+
+/**
+ * Cuts a reply into pieces to translate one by one, so the start of a long
+ * reply is shown translated while the rest is still on its way. A piece ends
+ * at a blank line outside a code fence, before a line that starts flush left
+ * (a list item's indented continuation stays with it), once it holds
+ * `size` characters. Each cut depends only on the text before it, so a reply
+ * cut while it streams and cut again whole gives the same pieces.
+ *
+ * `done` false (still streaming): only the pieces already closed are returned.
+ */
+export function pieces(text: string, done = true, size = PIECE_CHARS): string[] {
+  let t = text
+  if (!done) {
+    // An unclosed <context> block is still streaming; normalize drops it once whole.
+    const open = t.lastIndexOf('<context>')
+    if (open > t.lastIndexOf('</context>')) t = t.slice(0, open)
+  }
+  const lines = normalize(t).split('\n')
+  const out: string[] = []
+  let start = 0
+  let chars = 0
+  let fence = ''
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!
+    const cut =
+      !fence && chars >= size && i > 0 && !lines[i - 1]!.trim() && line !== '' && !/^\s/.test(line)
+    if (cut) {
+      out.push(lines.slice(start, i).join('\n').trim())
+      start = i
+      chars = 0
+    }
+    // The last line of a streaming text may be partial: it only matters once whole.
+    if (!done && i === lines.length - 1) break
+    const m = FENCE.exec(line)
+    if (m) {
+      if (!fence) fence = m[1]!
+      else if (m[1]![0] === fence[0] && m[1]!.length >= fence.length && line.trim() === m[1]) fence = ''
+    }
+    chars += line.trim().length
+  }
+  if (done) {
+    const rest = lines.slice(start).join('\n').trim()
+    if (rest) out.push(rest)
+  }
+  return out
+}
+
 /** The number of ``` fences: a translation that changes it broke a code block. */
 export function fenceCount(text: string): number {
   return (text.match(/```/g) ?? []).length
